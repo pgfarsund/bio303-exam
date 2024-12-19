@@ -1,0 +1,597 @@
+---
+title: "Bio303 exam 2024 Peter Groth Farsund"
+author: "Peter Groth Farsund (template by Richard Telford)"
+execute: 
+  echo: true
+  output: false
+date: today
+format: 
+  html:
+    self-contained: true
+    code-tools: 
+      source: true
+editor: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, include = TRUE, warning = FALSE, message = FALSE, output = TRUE) 
+```
+
+# Q1
+
+## Question
+
+Briefly describe the data you have to analyse for your MSc/PhD. (If you
+don't have any relevant data, consider a dataset you have worked on
+before, or might want to work on in the future)
+
+Discuss how you could at least two of the following methods to analyse
+your data:
+
+-   cluster analysis
+
+-   unconstrained ordination
+
+-   constrained ordination
+
+-   any other multivariate method (e.g., multivariate trees, principal
+    response curves, Procrustes rotation).
+
+For each method, discuss how it would help you test your hypothesis,
+which diagnostics you would use, how you would interpret them, and how
+you would identify any artifacts.
+
+## **Answer**
+
+The data I have to analyse for my PhD are soil fungal community data
+(OTUs) coupled with experimental treatments and environmental variables
+(soil nutrients, carbon, pH etc.).
+
+-   **Unconstrained ordination** would not help me test my hypothesis
+    because these methods are descriptive, but I could use it to try to
+    identify clusters of fungal OTUs in relation to the experimental and
+    environmental data, and the latent structure of the data. I would
+    start by performing a detrended correspondence analysis (DCA) to
+    determine gradient length.
+    -   If the length of the first axis was ≤2 SD I would proceed with
+        principal components analysis (PCA). I would interpret the PCA
+        by first looking at its eigenvalues to determine how many axes
+        are meaningful to display, e.g. by using the broken stick method
+        and including the axes with eigenvalue \> broken stick value. I
+        would then plot the PCA as a biplot and discard it if the data
+        points were shaped triangularly or horseshoe-y, as these are
+        likely artefacts.
+    -   If the first axis was ≥3 I would proceed with a unimodal method.
+        I would first test correspondence analysis (CA) and switch to
+        DCA if the resulting ordination plot showed an arch-shape. If
+        the DCA then showed a triangular shape, I would probably resort
+        to non-metric multidimensional scaling (NMDS).
+    -   If the first DCA axis was between 2-3, I would test both the
+        linear and unimodal approaches and go with the least artifact-y
+        and with most interpretability.
+-   I could use **constrained ordination** to assess the relationship
+    between fungal communities and environmental variables. This
+    includes partitioning variance in species composition and assessing
+    how much of the variance is explained by the environmental
+    variables, and testing hypotheses about the relationships between
+    the fungal communities and environmental variables.
+
+# Q2
+
+Radiolaria are planktic protists with silicious shells. Their remains
+can be found preserved in ocean sediments. This question uses the
+radiolarian data from Hernández-Almeida et al 2020
+(https://doi.pangaea.de/10.1594/PANGAEA.923034) who report percentage
+abundance of radiolarian species from locations across the Pacific
+ocean, and related environmental variables.
+
+<!-- -->
+
+## A
+
+Go to the webpage to see the metadata and download the data.
+
+Import the data into R and separate into species data, environmental
+data, and meta data (reference to latitude). Delete the water depth
+column (it has missing data).
+
+```{r}
+library(tidyverse)
+library(janitor)
+
+# read the dataset
+df <- read.table("https://doi.pangaea.de/10.1594/PANGAEA.923034?format=text",
+  fill = TRUE,
+  sep = "\t",
+  skip = 539,
+  header = FALSE
+) |>
+  row_to_names(1) |>
+  clean_names() |>
+  rename(
+    "f_cf_camerina_gr_percent_calculated" = "na", # the two last taxa in the table were named NA for some reason
+    "d_bandaicum_gr_percent_calculated" = "na_2"
+  ) |>
+  select(-depth_water_m)
+
+# separate environmental data and transform variables to numeric
+env <- df |>
+  select(4:22) |>
+  mutate_all(as.numeric) %>%
+  rename_with(
+    .cols = everything(),
+    .fn = ~ sub("_extracted.*", "", .)
+  ) # fix colnames
+
+# separate species data and transform to numeric
+sp <- df %>%
+  select(23:ncol(.)) |>
+  mutate_all(as.numeric)
+
+# separate reference to latitude
+ref_to_lon_lat <- df |>
+  select(reference, code_provcode, longitude, latitude)
+
+rm(df) # we don't need this anymore
+```
+
+## B
+
+Make an appropriate ordination of the environmental data. How many axes
+of the ordination are interpretable? Make a publishable plot showing the
+ordination.
+
+```{r}
+library(vegan)
+library(ggrepel)
+
+summary(env) # dimensionally heterogenous, PCA on correlation matrix
+
+env.pca <- rda(env, scale = TRUE) # scale = TRUE gives correlation matrix
+
+screeplot(env.pca, bstick = TRUE) # two axes bstick value < eigenvalue
+
+# make plot
+sites <- data.frame(scores(env.pca, display = c("sites")))
+
+arrows <- data.frame(scores(env.pca, display = "species")) |>
+  rownames_to_column(var = "var")
+
+(ggplot(data = sites, aes(x = PC1, y = PC2)) +
+  geom_point(pch = 21, fill = "lightblue", size = 3) +
+  geom_vline(aes(xintercept = 0), linetype = "dashed") +
+  geom_hline(aes(yintercept = 0), linetype = "dashed") +
+  theme_classic() +
+  geom_segment(
+    data = arrows, aes(x = 0, y = 0, xend = PC1, yend = PC2),
+    arrow = arrow(length = unit(0.2, "cm")), color = "black"
+  ) +
+  ggrepel::geom_label_repel(
+    data = arrows,
+    aes(x = PC1, y = PC2, label = var),
+    seed = 123,
+    fill = NA
+  ) +
+  theme(
+    axis.text.x = element_text(size = 12),
+    axis.title.x = element_text(size = 14),
+    axis.text.y = element_text(size = 12),
+    axis.title.y = element_text(size = 14)
+  ) +
+  ggtitle("PCA of Radiolaria environmental data"))
+```
+
+The environmental data seem dimensionally heterogenous and of different
+units, I therefore performed a PCA on a correlation matrix of the
+environmental data. The first two axes have a broken stick value \>axis
+eigenvalue, i.e. these two axes are interpretable. The third axis seems
+borderline interpretable. I hope the plot I made is publishable,
+although it is rather busy with all the arrows and labels.
+
+## C
+
+Using appropriate data transformations and treatment of rare taxa,
+determine whether linear or unimodal methods are more appropriate for
+ordinating the species data?
+
+```{r}
+# DCA with no transformation
+decorana(sp) # axis 1 = 6.4539
+
+# Hellinger transformation
+decorana(decostand(sp, "hellinger")) # axis 1 = 5.4452
+
+# Square-root transformation
+decorana(sqrt(sp)) # axis 1 = 5.5633
+
+# rank transformation
+decorana(decostand(sp, "rank")) # axis 1 = 5.0896
+
+# presence/absence scaling
+decorana(decostand(sp, "pa")) # axis 1 = 4.6424
+
+# chi-square transformation
+decorana(decostand(sp, "chi.square")) # axis 1 = 6.7912
+
+# remove species with a total abundance < 10
+decorana(select_if(sp, colSums(sp) > 10)) # 6.4598
+
+# downweighting rare species
+decorana(sp, iweigh = 1) # axis 1 = 6.0334
+```
+
+I have applied vraious transformations and tried removing taxa below
+abundance thresholds. The shortest DCA axis length I got in return was
+4.6424 by scaling the data to presence/absence data. This tells me that
+**unimodal** methods are more appropriate than linear methods for
+ordinating these data.
+
+## D
+
+Discuss the problems might occur if all the environmental variables are
+included as predictors? Show the problems where possible.
+
+Answer:
+
+We want a parsimonious model, i.e. the simplest model that best explains
+the data. Using all environmental variables can come with a lot of
+problems. It can make the ordination difficult to interpret and
+introduce noise, which in turn can make it difficult to see and
+apprehend actual signal. This noise can be strengthened if variables are
+inherently correlated with each other (e.g. total nitrogen and nitrate,
+surface temperature at different depths, etc.). Many variables in these
+environmental data are highly and correlated. The below plot shows that
+all variables have strong correlation coefficients to other variables
+(although correlations between specific pairs of variables is not
+shown). This multicollinearity can also obscure the statistical
+significance of the variables with true ecological meaning. In sum,
+including all environmental variables can make our model more complex
+without necessarily adding information or ecological insight, and
+obscure actual ecological signal.
+
+```{r}
+(data.frame(
+  cor(env, method = "spearman")
+) |>
+  pivot_longer(
+    cols = everything(),
+    names_to = "variable",
+    values_to = "cor_coef"
+  ) |>
+  filter(cor_coef < 1) |> # autocorrelation
+  ggplot(aes(x = variable, y = cor_coef, color = variable)) +
+  geom_hline(yintercept = 0, linetype = 2) +
+  geom_jitter(height = 0, width = 0.15) +
+  theme_classic() +
+  theme(
+    axis.title.x = element_blank(),
+    axis.text.x = element_text(angle = 90, hjust = 1),
+    legend.position = "none"
+  ) +
+  labs(y = "Correlation coefficients"))
+```
+
+## E
+
+Determine which environmental variable is the best predictor of
+radiolarian species composition.
+
+```{r}
+bioenv(sp, env, upto = 1)
+```
+
+I used `vegan::bioenv()` for this question, which found the variable
+"temp_c_sst_500_m" to be the best predictor of radiolaria species
+composition with a correlation of 0.5381126.
+
+## F
+
+Run a forward selection to find the "best" model for explaining
+radiolarian species composition. Discuss why so many variables are
+selected as predictors? How could you correct the analysis for this
+problem?
+
+```{r}
+library(adespatial)
+
+decorana(sp) # DCA1 = 6.4539, unimodal, CA
+
+mod.all <- cca(sp ~ ., data = env) # full model
+
+plot(mod.all, choices = c(1, 2)) # not pretty
+
+sort(vif.cca(mod.all)) # many variables VIF > 20 - not good
+
+# perform forward selection with adespatial::forward.sel()
+mod0 <- cca(sp ~ 1, data = env) # empty model
+
+mod.forward.sel <- forward.sel(Y = sp, X = env, verbose = FALSE) # included all 19 variables due to significance, but overfitting
+
+# use the R2 criterion for variable selection
+R2a.all <- RsquareAdj(mod.all)$adj.r.squared # get full model R2
+
+mod.forward.sel.r2.threshold <- forward.sel(Y = sp, X = env, adjR2thresh = R2a.all * 1.5)
+
+mod.best <- cca(sp ~ temp_c_sst_10_m + no3_mg_kg_10_m + si_oh_4_mmol_kg_200_m + sal_10_m + temp_c_sst_500_m, data = env) # 5 variables for forward.sel
+
+# compare mod.all to mod.best
+sort(vif.cca(mod.all))
+anova(mod.all)
+RsquareAdj(mod.all)
+plot(mod.all)
+
+sort(vif.cca(mod.best))
+anova(mod.best)
+RsquareAdj(mod.best)
+plot(mod.best)
+```
+
+I used `adespatial::forward.sel()` to run a forward selection in an
+attempt to find the "best" model. This returned all 19 environmental
+variables as significant predictors (P\<0.05). The cumulative adjusted
+R^2^ (~adj~R^2^) of this variable selection process was 0.4652640,
+nearly double of the ~adj~R^2^ of the model containing all variables
+(mod.all; 0.2407). This is a sign of overfitting. I think one reason for
+many variables being is selected is because of collinearity - the fact
+that variables that might not be important in the ecological context are
+correlated with those that are important. I have also read that relying
+purely on a pre-selected significance level for when to stop variable
+selection is known to be rather liberal, which can lead to type I errors
+(Numerical ecology with R, p.226).
+
+One way to correct for all variables being selected as predictors could
+be to add a criterion for when to stop adding variables to the forward
+selection, such as when a candidate variable brings the model's
+explanatory power over the explanatory power of the model containing all
+the variables (<https://doi.org/10.1890/07-0986.1>).
+
+Inspired by Numerical ecology with R (p. 277-279), I used
+`adespatial::forward.sel()` to adopt this criterion, setting the
+~adj~R^2^ threshold to ~adj~R^2^ of the model with all environmental
+variables (mod.all; 0.2407). This method identified two predictors
+(temp_c_sst_10_m and no3_mg_kg_10_m) with a cumulatic ~adj~R^2^ (0.2014)
+nearly as high as the model with all the variables. When setting the
+~adj~R^2^ threshold (arbitrarily) to 1.5 times the ~adj~R^2^ of the full
+model, `forward.sel()` identified five variables in total with a
+cumulative ~adj~R^2^ of 0.3473. A model with these five variables
+(mod.best) came at a cost of explanatory power (~adj~R^2^ = 0.1609), but
+was just as significant and without collinearity (at least all variance
+inflation factors were below 10). I think this corrected for some of the
+problem with all variables being selected as predictors, but there might
+be better solutions. I might have left out informative variables, for
+instance.
+
+Last but not least, the best thing to do when selecting environmental
+predictors for your model is to **apply a priori knowledge about which
+variables are important for your research question(s)**.
+
+## G
+
+Fit a model with 10 m sea surface temperature and net primary
+productivity as predictors. Make a publishable plot of this model.
+
+```{r}
+# subset required data
+df <- env |>
+  mutate(shannon = diversity(sp, "shannon")) |> # use Shannon diversity as response
+  select(shannon, temp_c_sst_10_m, npp_c_mg_m_2_day_ocean_productivity) |>
+  rename(
+    temp = temp_c_sst_10_m,
+    npp = npp_c_mg_m_2_day_ocean_productivity
+  )
+
+plot(df) # seem non-linear
+
+df |> # plot temp v. npp
+  ggplot(aes(
+    x = temp,
+    y = npp
+  )) +
+  geom_point() +
+  geom_smooth() # optimal temp for productivity?
+
+df |> # plot temp v. shannon
+  ggplot(aes(
+    x = temp,
+    y = shannon
+  )) +
+  geom_point() +
+  geom_smooth()
+
+df |> # plot npp v. shannon
+  ggplot(aes(
+    x = npp,
+    y = shannon
+  )) +
+  geom_point() +
+  geom_smooth()
+
+# run GAM
+library(mgcv)
+gam.mod <- gam(shannon ~ s(temp, npp, k = 60), data = df, method = "REML", family = gaussian(link = "identity"))
+par(mfrow = c(2, 2))
+gam.check(gam.mod) # model diagnostics look good enough
+
+par(mfrow = c(1, 1))
+
+# make publishable plot
+temp.plot <- df |>
+  ggplot(aes(
+    x = temp,
+    y = shannon
+  )) +
+  geom_point(shape = 21, size = 3, fill = "lightblue") +
+  geom_smooth(
+    method = "gam",
+    color = "firebrick1",
+    fill = "salmon"
+  ) +
+  theme_classic() +
+  ylab("Shannon diversity") +
+  xlab("Sea surface temperature (°C) at 10 m depth")
+
+npp.plot <- df |>
+  ggplot(aes(
+    x = npp,
+    y = shannon
+  )) +
+  geom_point(shape = 21, size = 3, fill = "lightblue") +
+  geom_smooth(
+    method = "gam",
+    color = "chartreuse4",
+    fill = "chartreuse2"
+  ) +
+  theme_classic() +
+  ylab(" ") +
+  xlab(expression(Net ~ primary ~ productivity ~ (mg ~ C / m^2 / day)))
+
+
+# combine plots to one figure
+library(ggpubr)
+ggarrange(temp.plot, npp.plot, nrow = 1)
+```
+
+I take it then that the response variable is free to choose for whoever
+is fitting the model, I'm going to use Shannon diversity of radiolara as
+the response.
+
+I decided to run a generalized additive model (GAM) because the
+relationships between the variables seemed very non-linear.
+
+I ran the GAM with a Gaussian distribution and stuck with it because I
+think the model diagnostics seemed good enough judging from this
+resource
+(<https://r.qcbs.ca/workshop08/book-en/gam-model-checking.html>).
+
+## H
+
+Use a cluster analysis to find clusters of sites. Decide how many
+clusters are interpretable and make a geographic map to show these
+clusters, and plots show how they differ with respect to 10 m sea
+surface temperature and net primary productivity.
+
+```{r}
+library(tidyverse)
+library(vegan)
+
+# subset coordinates
+coords <- ref_to_lon_lat |>
+  select(longitude, latitude) |>
+  mutate(
+    longitude = as.numeric(longitude),
+    latitude = as.numeric(latitude)
+  )
+
+# distance matrix
+dis <- dist(coords, method = "euclidean") # euclidean distance - ok for coords?
+
+# check different linkages
+par(mfrow = c(2, 2))
+hclust(d = dis, method = "single") |> plot(labels = F)
+hclust(d = dis, method = "complete") |> plot(labels = F)
+hclust(d = dis, method = "average") |> plot(labels = F) # going with average
+hclust(d = dis, method = "ward.D") |> plot(labels = F)
+par(mfrow = c(1, 1))
+
+tree <- hclust(d = dis, method = "average")
+plot(tree, labels = F) # 7-10 clusters?
+
+cluster <- cutree(tree = tree, h = 40) # get clusters
+coords$cluster <- as.factor(cluster) # put clusters in data
+
+# geographic maps
+xlims <- c(0, 360)
+ylims <- c(-80, 80)
+
+pacific <- map_data("world", wrap = xlims, ylim = ylims)
+
+# geographic cluster plot
+(ggplot() +
+  geom_polygon(data = pacific, aes(x = long, y = lat, group = group)) +
+  coord_map("rectangular", lat0 = 0, xlim = xlims, ylim = ylims) +
+  theme_classic() +
+  geom_point(
+    data = coords,
+    aes(
+      x = longitude,
+      y = latitude,
+      color = cluster,
+      shape = cluster
+    ),
+    size = 3
+  ) +
+  scale_shape_manual(values = c(1:9)) +
+  labs(
+    x = "Longitude",
+    y = "Latitude"
+  ) +
+  ggtitle("Geographic clusters"))
+
+
+coords2 <- data.frame(
+  coords,
+  npp = env$npp_c_mg_m_2_day_ocean_productivity,
+  temp = env$temp_c_sst_10_m
+)
+
+# temperature plot
+(ggplot() +
+  geom_polygon(data = pacific, aes(x = long, y = lat, group = group)) +
+  coord_map("rectangular", lat0 = 0, xlim = xlims, ylim = ylims) +
+  theme_classic() +
+  geom_point(
+    data = coords2,
+    aes(
+      x = longitude,
+      y = latitude,
+      color = temp,
+      shape = cluster
+    ),
+    size = 3
+  ) +
+  scale_color_gradient(low = "blue", high = "red") +
+  scale_shape_manual(values = 1:9) +
+  labs(
+    x = "Longitude",
+    y = "Latitude"
+  ) +
+  ggtitle("Clusters by 10 m sea surface temperature"))
+
+# NPP plot
+(ggplot() +
+  geom_polygon(data = pacific, aes(x = long, y = lat, group = group)) +
+  coord_map("rectangular", lat0 = 0, xlim = xlims, ylim = ylims) +
+  theme_classic() +
+  geom_point(
+    data = coords2,
+    aes(
+      x = longitude,
+      y = latitude,
+      color = npp,
+      shape = cluster
+    ),
+    size = 3,
+  ) +
+  scale_color_gradient(low = "tan4", high = "chartreuse1") +
+  scale_shape_manual(values = 1:9) +
+  labs(
+    x = "Longitude",
+    y = "Latitude"
+  ) +
+  ggtitle("Clusters by net primary productivity"))
+```
+
+I decided to use hierarchical clustering with Euclidean distance to
+cluster the sites. I seemed to remember that Euclidean distance measures
+the metric distance from point A to point B, which I think sounds
+appropriate when clustering sites.
+
+I made a geographic map showing the clusters and also two other maps
+showing differences in 10 m sea surface temperature and net primary
+productivity. These differences could also have been shown
+
+I nicked the code for the geographic map from here
+<https://stackoverflow.com/questions/5353184/fixing-maps-library-data-for-pacific-centred-0-360-longitude-display>),
+the bottom post by user Charly.
